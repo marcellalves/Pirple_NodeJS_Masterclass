@@ -1,5 +1,6 @@
 var _data = require('./data');
 var helpers = require('./helpers');
+var config = require('./config');
 
 var handlers = {};
 
@@ -159,6 +160,157 @@ handlers._users.delete = function(data, callback) {
     }
 }
 
+handlers.tokens = function(data, callback) {
+    var acceptableMethods = ['post', 'get', 'put', 'delete'];
+    if (acceptableMethods.indexOf(data.method) > -1) {
+        handlers._tokens[data.method](data, callback);
+    } else {
+        callback(405);
+    }
+};
+
+handlers._tokens = {};
+
+handlers._tokens.post = function(data, callback) {
+    var phone = typeof(data.payload.phone) == 'string' 
+    && data.payload.phone.trim().length == 10 
+    ? data.payload.phone.trim() : false;
+
+    var password = typeof(data.payload.password) == 'string' 
+    && data.payload.password.trim().length > 0 ?
+    data.payload.password.trim() : false;
+
+    if (phone && password) {
+        _data.read('users', phone, function(err, userData) {
+            if (!err && userData) {
+                var hashedPassword = helpers.hash(password);
+                if(hashedPassword == userData.hashedPassword) {
+                    var tokenId = helpers.createRandomString(20);
+                    var expires = Date.now() + 1000 * 60 * 60;
+                    var tokenObject = {
+                        'phone' : phone,
+                        'id' : tokenId,
+                        'expires' : expires
+                    };
+
+                    _data.create('tokens', tokenId, tokenObject, function(err) {
+                        if (!err) {
+                            callback(200, tokenObject);
+                        } else {
+                            callback(500, {'Error' : 'Could not create new token' });
+                        }
+                    });
+                } else {
+                    callback(400, { 'Error': 'Password did not match'});
+                }
+            } else {
+                callback(400, { 'Error' :  'Could not find the specified user' });
+            }
+        });
+    }
+};
+
+handlers._tokens.get = function(data, callback) {
+    
+};
+
+handlers._tokens.put = function(data, callback) {
+    
+};
+
+handlers._tokens.delete = function(data, callback) {
+    
+};
+
+handlers.checks = function(data, callback) {
+    var acceptableMethods = ['post', 'get', 'put', 'delete'];
+    if (acceptableMethods.indexOf(data.method) > -1) {
+        handlers._checks[data.method](data, callback);
+    } else {
+        callback(405);
+    }
+};
+
+handlers._checks = {};
+
+handlers._checks.post = function(data, callback) {
+    var protocol = typeof(data.payload.protocol) == 'string' 
+    && ['https','http'].indexOf(data.payload.protocol) > -1
+    ? data.payload.protocol : false;
+
+    var url = typeof(data.queryStringObject.url) == 'string' 
+    && data.queryStringObject.url.trim().length > 0 
+    ? data.queryStringObject.url.trim() : false;
+
+    var method = typeof(data.payload.method) == 'string' 
+    && ['post','get', 'put', 'delete'].indexOf(data.payload.method) > -1
+    ? data.payload.method : false;
+
+    var successCodes = typeof(data.queryStringObject.successCodes) == 'object' 
+    && data.queryStringObject.successCodes instanceof Array 
+    && data.queryStringObject.successCodes.length > 0 
+    ? data.queryStringObject.successCodes : false;
+
+    var timeoutSeconds = typeof(data.queryStringObject.timeoutSeconds) == 'number' 
+    && data.queryStringObject.timeoutSeconds % 1 === 0 
+    && data.queryStringObject.timeoutSeconds >= 1
+    && data.queryStringObject.timeoutSeconds <= 5
+    ? data.queryStringObject.timeoutSeconds : false;
+
+    if (protocol && url && method && successCodes && timeoutSeconds) {
+        var token = typeof(data.headers.token) == 'string' ? data.headers.token : false;
+
+        _data.read('tokens', token, function(err, tokenData) {
+            if (!err && tokenData) {
+                var userPhone = tokenData.phone;
+
+                _data.read('users', userPhone, function(err, userData) {
+                    if (!err && userData) {
+                        var userChecks = typeof(userData.checks) == 'object' 
+                        && userData.checks instanceof Array ? userData.checks : [];
+
+                        if (userChecks.length < webkitConvertPointFromPageToNode.maxChecks) {
+                            var checkId = helpers.createRandomString(20);
+
+                            var checkObject = {
+                                'id': checkId,
+                                'userPhone': userPhone,
+                                'protocol': protocol,
+                                'url': url,
+                                'method': method,
+                                'successCodes': successCodes,
+                                'timeoutSeconds': timeoutSeconds
+                            };
+
+                            _data.create('checks', checkId, checkObject, function(err) {
+                                if (!err) {
+                                    userData.checks = userChecks;
+                                    userData.checks.push(checkId);
+
+                                    _data.update('users', userPhone, userData, function(err) {
+                                        if (!err) {
+                                            callback(200, checkObject);
+                                        } else {
+                                            callback(500, { 'Error' : 'Could not update the user with the new check'});
+                                        }
+                                    });
+                                }
+                            });
+                        } else {
+                            callback(400, {'Error' : 'User already has the maximum number of checks ('+config.maxChecks+')'});
+                        }
+                    } else {
+                        callback(403);
+                    }
+                });
+            } else {
+                callback(403);
+            }
+        });
+    } else {
+        callback(400, {'Error' : 'Missing required inputs or inputs are invalid'});
+    }
+};
 
 handlers.ping = function(data, callback) {
     callback(200);
